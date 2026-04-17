@@ -1,55 +1,53 @@
 // ==========================================
-// CONTROLE DE EIXOS X/Y - LÓGICA SOMATIVA (DELTA)
+// CONTROLE SOMATIVO COM FILTRO DE RUÍDO
 // ==========================================
 
 class EixoPotenciometro {
   private:
     byte pinoAnalogico;
-    char cmdSobe;    // Direita / Cima
-    char cmdDesce;   // Esquerda / Baixo
-    char cmdParado; 
+    char cmdSobe, cmdDesce, cmdParado;
     
     int valorAnterior;
     unsigned long ultimoTempoMovimento;
     char estadoAtual;
     
-    const int threshold = 3;           // Sensibilidade do movimento
-    const unsigned long tempoMovimento = 300; // Quanto tempo o sinal persiste (ms)
+    // Aumentamos o threshold. No ESP32, 3 é muito pouco (causa movimento infinito)
+    // 30 é um valor mais seguro para ignorar o "tremido" do sensor.
+    const int threshold = 30; 
+    const unsigned long tempoPersistencia = 250; // Tempo que o comando dura após girar
 
   public:
-    EixoPotenciometro(byte pino, char comandoSobe, char comandoDesce, char comandoParado) {
+    EixoPotenciometro(byte pino, char sobe, char desce, char parado) {
       pinoAnalogico = pino;
-      cmdSobe = comandoSobe;
-      cmdDesce = comandoDesce;
-      cmdParado = comandoParado;
+      cmdSobe = sobe;
+      cmdDesce = desce;
+      cmdParado = parado;
     }
 
     void iniciar() {
       pinMode(pinoAnalogico, INPUT);
+      // Forçamos o ESP32 a ler de 0 a 1023 (igual ao seu código Python)
+      #ifdef ESP32
+        analogReadResolution(10); 
+      #endif
       valorAnterior = analogRead(pinoAnalogico);
-      ultimoTempoMovimento = 0;
       estadoAtual = cmdParado;
+      ultimoTempoMovimento = 0;
     }
 
     char lerEstado() {
       int valorAtual = analogRead(pinoAnalogico);
       unsigned long agora = millis();
+      int diferenca = valorAtual - valorAnterior;
 
-      // LÓGICA SOMATIVA: Detecta a mudança (Delta)
-      // Se a diferença for maior que o threshold, define a direção
-      if (abs(valorAtual - valorAnterior) > threshold) {
-        if (valorAtual > valorAnterior) {
-          estadoAtual = cmdSobe;
-        } else {
-          estadoAtual = cmdDesce;
-        }
-        
+      // Se a variação for real (maior que o ruído)
+      if (abs(diferenca) > threshold) {
+        estadoAtual = (diferenca > 0) ? cmdSobe : cmdDesce;
         valorAnterior = valorAtual;
-        ultimoTempoMovimento = agora; // Reseta o cronômetro de persistência
-      }
-
-      // Se parou de girar e passou o tempo de persistência, volta a ficar parado
-      if (agora - ultimoTempoMovimento > tempoMovimento) {
+        ultimoTempoMovimento = agora;
+      } 
+      // Se parou de girar, espera o tempo de persistência para mandar 'P'
+      else if (agora - ultimoTempoMovimento > tempoPersistencia) {
         estadoAtual = cmdParado;
       }
 
@@ -57,31 +55,24 @@ class EixoPotenciometro {
     }
 };
 
-// ==========================================
-// Instanciando os Eixos
-// ==========================================
-// Pot 34 -> Eixo X (D=Direita, E=Esquerda)
-// Pot 35 -> Eixo Y (C=Cima, B=Baixo)
+// Instanciação (X=34, Y=35)
 EixoPotenciometro eixoX(34, 'D', 'E', 'P'); 
 EixoPotenciometro eixoY(35, 'C', 'B', 'P');
 
 void setup() {
-  Serial.begin(115200); 
+  Serial.begin(115200);
   eixoX.iniciar();
   eixoY.iniciar();
 }
 
 void loop() {
-  // Coleta os estados baseados no movimento (Delta)
   char stX = eixoX.lerEstado();
   char stY = eixoY.lerEstado();
 
-  // Pacote de 2 bytes para a Unity
+  // Envio binário exato para Unity
   byte pacote[2] = {(byte)stX, (byte)stY};
-  
-  // Envio simultâneo via Serial Write
   Serial.write(pacote, 2);
 
-  // Intervalo de 50ms para bater com a lógica do seu Python original
-  delay(50); 
+  // 50ms de delay para não engasgar o buffer da Unity
+  delay(50);
 }
