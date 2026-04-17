@@ -1,78 +1,80 @@
 // ==========================================
-// CONTROLE SOMATIVO - SENSIBILIDADE AJUSTADA
+// CONTROLE X/Y - LÓGICA DELTA PURA (JOYSTICK SOMATIVO)
 // ==========================================
 
-class EixoPotenciometro {
+class Eixo {
   private:
-    byte pinoAnalogico;
+    byte pino;
     char cmdPos, cmdNeg, cmdParado;
     
-    int valorReferencia;      // O último valor "estável" registrado
-    unsigned long tempoUltimoMovimento;
-    char estadoAtual;
+    int lastVal;              // Último valor estável para comparação
+    unsigned long lastMove;   // Timer para o timeout de 300ms
+    char estado;              // Estado atual (D, E, C, B ou P)
     
-    const int threshold = 7;         // Sensibilidade (se não mexer, aumente; se mexer sozinho, diminua)
-    const unsigned long timeout = 300; // Tempo para parar (ms)
+    // AJUSTE DE SENSIBILIDADE AQUI:
+    const int threshold = 8;        // Se não mexer, diminua. Se tremer sozinho, aumente.
+    const unsigned long timeout = 300; // Tempo de persistência do comando (ms)
 
   public:
-    EixoPotenciometro(byte pino, char p, char n, char parado) {
-      pinoAnalogico = pino;
-      cmdPos = p;
-      cmdNeg = n;
-      cmdParado = parado;
+    Eixo(byte p, char pos, char neg, char parado) {
+      pino = p; cmdPos = pos; cmdNeg = neg; cmdParado = parado;
     }
 
-    void iniciar() {
-      pinMode(pinoAnalogico, INPUT);
+    void setup() {
+      pinMode(pino, INPUT);
       #ifdef ESP32
-        analogReadResolution(10); // 0 a 1023 para bater com seu Python
+        analogReadResolution(10); // Escala 0-1023 (Igual ao Python)
       #endif
-      delay(10);
-      valorReferencia = analogRead(pinoAnalogico);
-      estadoAtual = cmdParado;
-      tempoUltimoMovimento = 0;
+      lastVal = analogRead(pino);
+      estado = cmdParado;
+      lastMove = 0;
     }
 
-    char lerEstado() {
-      int valorLido = analogRead(pinoAnalogico);
+    char atualizar() {
+      int currentVal = analogRead(pino);
       unsigned long agora = millis();
-      int delta = valorLido - valorReferencia;
+      int diff = currentVal - lastVal;
 
-      // Se a mão moveu o pot mais que o ruído (threshold)
-      if (abs(delta) >= threshold) {
-        estadoAtual = (delta > 0) ? cmdPos : cmdNeg;
+      // 1. DETECÇÃO DE MOVIMENTO (A lógica do seu update_x / update_y)
+      if (abs(diff) > threshold) {
+        // Define a direção baseada no delta
+        estado = (diff > 0) ? cmdPos : cmdNeg;
         
-        // AQUI ESTÁ O SEGREDO: Atualiza a referência para o novo ponto
-        valorReferencia = valorLido; 
-        tempoUltimoMovimento = agora;
+        // Atualiza referência e reseta o timer
+        lastVal = currentVal;
+        lastMove = agora;
       } 
-      // Se parou de girar por mais de 300ms, volta pro repouso
-      else if (agora - tempoUltimoMovimento > timeout) {
-        estadoAtual = cmdParado;
+      
+      // 2. TIMEOUT DE PARADA (A lógica do seu processar_logica)
+      // Se o tempo passou e não houve novo movimento, volta a ser 'P'
+      if (agora - lastMove > timeout) {
+        estado = cmdParado;
       }
 
-      return estadoAtual;
+      return estado;
     }
 };
 
-// Configuração (X=34, Y=35)
-EixoPotenciometro eixoX(34, 'D', 'E', 'P'); 
-EixoPotenciometro eixoY(35, 'C', 'B', 'P');
+// --- INSTÂNCIAS ---
+// Pino, Positivo, Negativo, Parado
+Eixo eixoX(34, 'D', 'E', 'P'); 
+Eixo eixoy(35, 'C', 'B', 'P');
 
 void setup() {
   Serial.begin(115200);
-  eixoX.iniciar();
-  eixoY.iniciar();
+  eixoX.setup();
+  eixoy.setup();
 }
 
 void loop() {
-  char stX = eixoX.lerEstado();
-  char stY = eixoY.lerEstado();
+  // Coleta os estados dos eixos
+  char x = eixoX.atualizar();
+  char y = eixoy.atualizar();
 
-  // Pacote de 2 bytes para a Unity
-  byte pacote[2] = {(byte)stX, (byte)stY};
+  // Envia EXATAMENTE 2 bytes via Serial Write para a Unity
+  byte pacote[2] = {(byte)x, (byte)y};
   Serial.write(pacote, 2);
 
-  // 50ms de intervalo (mesmo do seu script Python)
+  // Delay de 50ms para manter a taxa de atualização do Python (20Hz)
   delay(50);
 }
