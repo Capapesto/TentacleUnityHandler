@@ -1,75 +1,87 @@
 // ==========================================
-// CONTROLE DE EIXOS X/Y - MODO JOYSTICK
+// CONTROLE DE EIXOS X/Y - LÓGICA SOMATIVA (DELTA)
 // ==========================================
 
 class EixoPotenciometro {
   private:
     byte pinoAnalogico;
-    char cmdPositivo; // Direita ou Cima
-    char cmdNegativo; // Esquerda ou Baixo
+    char cmdSobe;    // Direita / Cima
+    char cmdDesce;   // Esquerda / Baixo
     char cmdParado; 
     
-    // Ajuste esses valores se o seu potenciômetro for sensível demais
-    const int limiteInferior = 400; 
-    const int limiteSuperior = 600; 
+    int valorAnterior;
+    unsigned long ultimoTempoMovimento;
+    char estadoAtual;
+    
+    const int threshold = 3;           // Sensibilidade do movimento
+    const unsigned long tempoMovimento = 300; // Quanto tempo o sinal persiste (ms)
 
   public:
-    EixoPotenciometro(byte pino, char positivo, char negativo, char parado) {
+    EixoPotenciometro(byte pino, char comandoSobe, char comandoDesce, char comandoParado) {
       pinoAnalogico = pino;
-      cmdPositivo = positivo;
-      cmdNegativo = negativo;
-      cmdParado = parado;
+      cmdSobe = comandoSobe;
+      cmdDesce = comandoDesce;
+      cmdParado = comandoParado;
     }
 
     void iniciar() {
       pinMode(pinoAnalogico, INPUT);
+      valorAnterior = analogRead(pinoAnalogico);
+      ultimoTempoMovimento = 0;
+      estadoAtual = cmdParado;
     }
 
     char lerEstado() {
       int valorAtual = analogRead(pinoAnalogico);
+      unsigned long agora = millis();
 
-      // Lógica de posição absoluta (Estilo Joystick)
-      if (valorAtual > limiteSuperior) {
-        return cmdPositivo;
-      } 
-      else if (valorAtual < limiteInferior) {
-        return cmdNegativo;
-      } 
-      else {
-        return cmdParado;
+      // LÓGICA SOMATIVA: Detecta a mudança (Delta)
+      // Se a diferença for maior que o threshold, define a direção
+      if (abs(valorAtual - valorAnterior) > threshold) {
+        if (valorAtual > valorAnterior) {
+          estadoAtual = cmdSobe;
+        } else {
+          estadoAtual = cmdDesce;
+        }
+        
+        valorAnterior = valorAtual;
+        ultimoTempoMovimento = agora; // Reseta o cronômetro de persistência
       }
+
+      // Se parou de girar e passou o tempo de persistência, volta a ficar parado
+      if (agora - ultimoTempoMovimento > tempoMovimento) {
+        estadoAtual = cmdParado;
+      }
+
+      return estadoAtual;
     }
 };
 
 // ==========================================
-// Configuração dos Eixos
+// Instanciando os Eixos
 // ==========================================
-
-// Pinos 34 e 35 (ESP32). Se for Arduino Uno, mude para A0 e A1
-EixoPotenciometro eixoX(34, 'D', 'E', 'P'); // Direita, Esquerda, Parado
-EixoPotenciometro eixoY(35, 'C', 'B', 'P'); // Cima, Baixo, Parado
+// Pot 34 -> Eixo X (D=Direita, E=Esquerda)
+// Pot 35 -> Eixo Y (C=Cima, B=Baixo)
+EixoPotenciometro eixoX(34, 'D', 'E', 'P'); 
+EixoPotenciometro eixoY(35, 'C', 'B', 'P');
 
 void setup() {
-  // A Unity geralmente trabalha bem com 9600 ou 115200. 
-  // Garanta que no C# esteja igual!
   Serial.begin(115200); 
-  
   eixoX.iniciar();
   eixoY.iniciar();
 }
 
 void loop() {
-  // Pega o estado baseado na POSIÇÃO do potenciômetro
-  char estadoX = eixoX.lerEstado();
-  char estadoY = eixoY.lerEstado();
+  // Coleta os estados baseados no movimento (Delta)
+  char stX = eixoX.lerEstado();
+  char stY = eixoY.lerEstado();
 
-  // Cria o pacote de 2 bytes
-  byte pacote[2] = {(byte)estadoX, (byte)estadoY};
+  // Pacote de 2 bytes para a Unity
+  byte pacote[2] = {(byte)stX, (byte)stY};
   
-  // Envia para a Unity
+  // Envio simultâneo via Serial Write
   Serial.write(pacote, 2);
 
-  // Um delay curto para não sobrecarregar o buffer da Unity
-  // 20ms = 50 FPS de atualização de dados
-  delay(20); 
+  // Intervalo de 50ms para bater com a lógica do seu Python original
+  delay(50); 
 }
