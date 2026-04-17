@@ -1,64 +1,55 @@
 // ==========================================
-// CONTROLE SOMATIVO - VERSÃO ESTÁVEL (ESP32)
+// CONTROLE DE EIXOS X/Y - LÓGICA DELTA (PYTHON)
 // ==========================================
 
 class EixoPotenciometro {
   private:
     byte pinoAnalogico;
-    char cmdSobe, cmdDesce, cmdParado;
+    char cmdPositivo; // D ou C
+    char cmdNegativo; // E ou B
+    char cmdParado;   // P
     
-    int valorAnterior;
-    unsigned long ultimoTempoMovimento;
+    int lastVal;
+    unsigned long lastMoveTime;
     char estadoAtual;
     
-    // Threshold maior para ignorar o "jitter" do ESP32
-    const int threshold = 25; 
-    const unsigned long tempoPersistencia = 200; 
-
-    // Função interna para ler o valor sem ruído
-    int lerSuave() {
-      long soma = 0;
-      for(int i = 0; i < 10; i++) {
-        soma += analogRead(pinoAnalogico);
-      }
-      return soma / 10;
-    }
+    // Seguindo seus parâmetros do Python:
+    const int threshold = 5;         // Aumentei de 3 para 5 por causa de ruído elétrico
+    const unsigned long timeout = 300; // 300ms para voltar a 'P'
 
   public:
-    EixoPotenciometro(byte pino, char sobe, char desce, char parado) {
+    EixoPotenciometro(byte pino, char pos, char neg, char parado) {
       pinoAnalogico = pino;
-      cmdSobe = sobe;
-      cmdDesce = desce;
+      cmdPositivo = pos;
+      cmdNegativo = neg;
       cmdParado = parado;
     }
 
     void iniciar() {
-      // Configurações específicas para estabilizar o ADC do ESP32
-      #ifdef ESP32
-        analogReadResolution(10); // 0 a 1023
-        analogSetAttenuation(ADC_11db); // Permite ler até 3.3V perfeitamente
-      #endif
-      
       pinMode(pinoAnalogico, INPUT);
-      delay(10);
-      valorAnterior = lerSuave();
+      #ifdef ESP32
+        analogReadResolution(10); // Normaliza para 0-1023 igual ao Python
+      #endif
+      lastVal = analogRead(pinoAnalogico);
+      lastMoveTime = millis();
       estadoAtual = cmdParado;
-      ultimoTempoMovimento = 0;
     }
 
     char lerEstado() {
-      int valorAtual = lerSuave();
+      int currentVal = analogRead(pinoAnalogico);
       unsigned long agora = millis();
-      int diferenca = valorAtual - valorAnterior;
 
-      // DETECÇÃO DE MOVIMENTO REAL
-      if (abs(diferenca) > threshold) {
-        estadoAtual = (diferenca > 0) ? cmdSobe : cmdDesce;
-        valorAnterior = valorAtual; // Só atualiza se moveu de verdade
-        ultimoTempoMovimento = agora;
-      } 
-      // VOLTA PARA PARADO
-      else if (agora - ultimoTempoMovimento > tempoPersistencia) {
+      // EQUIVALENTE AO: if abs(v - self.last_val_x) > 3
+      if (abs(currentVal - lastVal) > threshold) {
+        // EQUIVALENTE AO: 'D' if v > self.last_val_x else 'E'
+        estadoAtual = (currentVal > lastVal) ? cmdPositivo : cmdNegativo;
+        
+        lastVal = currentVal;   // self.last_val_x = v
+        lastMoveTime = agora;   // self.last_move_x = time.time()
+      }
+
+      // EQUIVALENTE AO: if agora - self.last_move_x > 0.3
+      if (agora - lastMoveTime > timeout) {
         estadoAtual = cmdParado;
       }
 
@@ -66,7 +57,10 @@ class EixoPotenciometro {
     }
 };
 
-// Configuração dos Eixos
+// ==========================================
+// SETUP E LOOP PRINCIPAL
+// ==========================================
+
 EixoPotenciometro eixoX(34, 'D', 'E', 'P'); 
 EixoPotenciometro eixoY(35, 'C', 'B', 'P');
 
@@ -77,12 +71,16 @@ void setup() {
 }
 
 void loop() {
+  // Coleta os estados
   char stX = eixoX.lerEstado();
   char stY = eixoY.lerEstado();
 
-  // Envio binário de 2 bytes para a Unity
+  // MONTA O PACOTE (Exatamente 2 bytes)
   byte pacote[2] = {(byte)stX, (byte)stY};
+
+  // ENVIO SERIAL WRITE (Para Unity)
   Serial.write(pacote, 2);
 
-  delay(40); // Frequência de 25Hz (Estável para Unity)
+  // EQUIVALENTE AO: self.root.after(50, ...)
+  delay(50); 
 }
