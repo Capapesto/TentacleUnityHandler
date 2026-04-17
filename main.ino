@@ -1,5 +1,8 @@
-class EixoPotenciometro {
+// ==========================================
+// CONTROLE DE EIXOS X/Y COM POTENCIÔMETROS
+// ==========================================
 
+class EixoPotenciometro {
   private:
     byte pinoAnalogico;
     char cmdSobe;
@@ -10,11 +13,10 @@ class EixoPotenciometro {
     unsigned long ultimoTempoMovimento;
     char estadoAtual;
     
-    const int threshold = 4; 
-    const unsigned long tempoEstatico = 300;
+    const int threshold = 3; // Margem de ruído (igual ao > 3 do Python)
+    const unsigned long tempoEstatico = 300; // 300ms para voltar ao repouso
 
   public:
-    
     EixoPotenciometro(byte pino, char comandoSobe, char comandoDesce, char comandoParado) {
       pinoAnalogico = pino;
       cmdSobe = comandoSobe;
@@ -33,12 +35,12 @@ class EixoPotenciometro {
       int valorAtual = analogRead(pinoAnalogico);
       unsigned long tempoAtual = millis();
 
-      // Detecta movimento
+      // Verifica se a variação foi maior que o ruído
       if (abs(valorAtual - valorAnterior) > threshold) {
-
+        
         if (valorAtual > valorAnterior) {
           estadoAtual = cmdSobe;
-        } else {
+        } else if (valorAtual < valorAnterior) {
           estadoAtual = cmdDesce;
         }
 
@@ -46,8 +48,8 @@ class EixoPotenciometro {
         ultimoTempoMovimento = tempoAtual;
       }
 
-      // Timeout → parado
-      if (tempoAtual - ultimoTempoMovimento > tempoEstatico) {
+      // Se passou o tempo estático sem novas variações, volta para "Parado"
+      if (estadoAtual != cmdParado && (tempoAtual - ultimoTempoMovimento >= tempoEstatico)) {
         estadoAtual = cmdParado;
       }
 
@@ -55,38 +57,37 @@ class EixoPotenciometro {
     }
 };
 
-
 // ==========================================
-// Eixos
+// Instanciando os Eixos
+// (Pino, Sobe/Direita, Desce/Esquerda, Parado)
+// P = Parado, E = Esquerda, D = Direita, B = Baixo, C = Cima
 // ==========================================
-EixoPotenciometro eixoX(D34, 'D', 'E', 'P'); 
-EixoPotenciometro eixoY(D35, 'C', 'B', 'P');
 
-// Timer de envio (igual ao after do Python)
-unsigned long ultimoEnvio = 0;
-const int intervaloEnvio = 50; // ms
+// Nota: D34 e D35 são pinos típicos de ESP32. Se for Arduino Uno, use A0 e A1.
+EixoPotenciometro eixoX(34, 'D', 'E', 'P'); 
+EixoPotenciometro eixoY(35, 'C', 'B', 'P');
 
 void setup() {
-  Serial.begin(115200);
-
+  Serial.begin(115200); 
+  
   eixoX.iniciar();
   eixoY.iniciar();
 }
 
 void loop() {
+  // Coleta dos estados atuais
+  char estadoX = eixoX.lerEstado();
+  char estadoY = eixoY.lerEstado();
 
-  unsigned long agora = millis();
+  // Monta o pacote no mesmo formato do Python (ex: "PP", "DP", "EC")
+  char pacote[3];
+  pacote[0] = estadoX;
+  pacote[1] = estadoY;
+  pacote[2] = '\0'; // Terminador de string (opcional, mas bom para debug)
+  
+  // Envia os "negócio pra usb"
+  Serial.print(pacote);
 
-  // equivalente ao root.after(50)
-  if (agora - ultimoEnvio >= intervaloEnvio) {
-
-    char estadoX = eixoX.lerEstado();
-    char estadoY = eixoY.lerEstado();
-
-    byte pacote[2] = {estadoX, estadoY};
-
-    Serial.write(pacote, 2);
-
-    ultimoEnvio = agora;
-  }
+  // Aguarda 50ms para replicar o self.root.after(50) do Tkinter
+  delay(50); 
 }
