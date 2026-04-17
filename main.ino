@@ -1,56 +1,95 @@
-#include <Arduino.h>
+class EixoPotenciometro {
 
-// Configurações dos Pinos
-const int pinoX = 34; 
-const int pinoY = 35;
+  private:
+    byte pinoAnalogico;
+    char cmdSobe;
+    char cmdDesce;
+    char cmdParado; 
+    
+    int valorAnterior;
+    unsigned long ultimoTempoMovimento;
+    char estadoAtual;
+    
+    const int threshold = 4;
+    const unsigned long tempoEstatico = 300;
 
-// Configurações do Joystick (Resistência)
-const int CENTRO = 512;
-const int MARGEM = 150; // Deadzone para não mover sozinho
+  public:
+    
+    EixoPotenciometro(byte pino, char comandoSobe, char comandoDesce, char comandoParado) {
+      pinoAnalogico = pino;
+      cmdSobe = comandoSobe;
+      cmdDesce = comandoDesce;
+      cmdParado = comandoParado;
+    }
+
+    void iniciar() {
+      pinMode(pinoAnalogico, INPUT);
+      valorAnterior = analogRead(pinoAnalogico);
+      ultimoTempoMovimento = millis();
+      estadoAtual = cmdParado;
+    }
+
+    char lerEstado() {
+      int valorAtual = analogRead(pinoAnalogico);
+      unsigned long tempoAtual = millis();
+
+      // Detecta movimento real (ignora ruído)
+      if (abs(valorAtual - valorAnterior) > threshold) {
+
+        if (valorAtual > valorAnterior) {
+          estadoAtual = cmdSobe;
+        } else {
+          estadoAtual = cmdDesce;
+        }
+
+        valorAnterior = valorAtual;
+        ultimoTempoMovimento = tempoAtual;
+      }
+
+      // Se parou por 300ms → estado parado
+      if (tempoAtual - ultimoTempoMovimento > tempoEstatico) {
+        estadoAtual = cmdParado;
+      }
+
+      return estadoAtual;
+    }
+};
+
+
+// ==============================
+// CONFIGURAÇÃO DOS EIXOS
+// ==============================
+// ajuste os pinos conforme sua placa
+EixoPotenciometro eixoX(A0, 'D', 'E', 'P'); 
+EixoPotenciometro eixoY(A1, 'C', 'B', 'P');
+
+// ==============================
+// CONTROLE DE ENVIO (igual Unity espera)
+// ==============================
+unsigned long ultimoEnvio = 0;
+const int intervaloEnvio = 20; // 50Hz (mais suave que 50ms)
 
 void setup() {
-    // Mesma velocidade do seu SerialController.cs
-    Serial.begin(115200);
+  Serial.begin(115200);
 
-    #ifdef ESP32
-        analogReadResolution(10); // 0 a 1023
-        analogSetAttenuation(ADC_11db); // Leitura completa de 0 a 3.3V
-    #endif
-
-    pinMode(pinoX, INPUT);
-    pinMode(pinoY, INPUT);
+  eixoX.iniciar();
+  eixoY.iniciar();
 }
 
 void loop() {
-    int leituraX = analogRead(pinoX);
-    int leituraY = analogRead(pinoY);
 
-    char estadoX = 'P';
-    char estadoY = 'P';
+  unsigned long agora = millis();
 
-    // Lógica Eixo X (D, E, P)
-    if (leituraX > (CENTRO + MARGEM)) {
-        estadoX = 'D';
-    } else if (leituraX < (CENTRO - MARGEM)) {
-        estadoX = 'E';
-    }
+  // envio contínuo (IMPORTANTE pro seu sistema físico)
+  if (agora - ultimoEnvio >= intervaloEnvio) {
 
-    // Lógica Eixo Y (C, B, P)
-    if (leituraY > (CENTRO + MARGEM)) {
-        estadoY = 'C';
-    } else if (leituraY < (CENTRO - MARGEM)) {
-        estadoY = 'B';
-    }
+    char estadoX = eixoX.lerEstado();
+    char estadoY = eixoY.lerEstado();
 
-    // Monta o pacote de 2 bytes exatos para o stream.Read(buffer, 0, 2)
-    byte pacote[2] = {(byte)estadoX, (byte)estadoY};
+    byte pacote[2] = {estadoX, estadoY};
 
-    // Envia os bytes crus
     Serial.write(pacote, 2);
-    
-    // Garante que os dados saiam do buffer do chip para o Windows imediatamente
-    Serial.flush();
 
-    // Delay de 50ms para sincronizar com o processamento da Unity
-    delay(50);
+    ultimoEnvio = agora;
+  }
 }
