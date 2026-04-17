@@ -1,55 +1,56 @@
-class Eixo {
-  private:
-    byte pino;
-    char cmdPos, cmdNeg, cmdParado;
-    const int centro = 512;
-    const int margem = 150; 
+#include <Arduino.h>
 
-  public:
-    Eixo(byte p, char pos, char neg, char parado) : 
-      pino(p), cmdPos(pos), cmdNeg(neg), cmdParado(parado) {}
+// Configurações dos Pinos
+const int pinoX = 34; 
+const int pinoY = 35;
 
-    void setup() {
-      pinMode(pino, INPUT);
-      #ifdef ESP32
-        analogReadResolution(10); 
-      #endif
-    }
-
-    char lerEstado() {
-      int valor = analogRead(pino);
-      if (valor > (centro + margem)) return cmdPos;
-      if (valor < (centro - margem)) return cmdNeg;
-      return cmdParado;
-    }
-};
-
-Eixo eixoX(34, 'D', 'E', 'P'); 
-Eixo eixoY(35, 'C', 'B', 'P');
+// Configurações do Joystick (Resistência)
+const int CENTRO = 512;
+const int MARGEM = 150; // Deadzone para não mover sozinho
 
 void setup() {
-  // 115200 é alto para o .NET Framework instável. 
-  // Se não funcionar, tente baixar para 9600 em ambos os lados.
-  Serial.begin(115200);
-  
-  eixoX.setup();
-  eixoY.setup();
-  
-  // Aguarda a porta estabilizar
-  while (!Serial) { ; } 
+    // Mesma velocidade do seu SerialController.cs
+    Serial.begin(115200);
+
+    #ifdef ESP32
+        analogReadResolution(10); // 0 a 1023
+        analogSetAttenuation(ADC_11db); // Leitura completa de 0 a 3.3V
+    #endif
+
+    pinMode(pinoX, INPUT);
+    pinMode(pinoY, INPUT);
 }
 
 void loop() {
-  char x = eixoX.lerEstado();
-  char y = eixoY.lerEstado();
+    int leituraX = analogRead(pinoX);
+    int leituraY = analogRead(pinoY);
 
-  // Envio binário
-  byte pacote[2] = {(byte)x, (byte)y};
-  
-  Serial.write(pacote, 2);
-  
-  // Força o envio imediato do buffer para o Windows
-  Serial.flush(); 
+    char estadoX = 'P';
+    char estadoY = 'P';
 
-  delay(50);
+    // Lógica Eixo X (D, E, P)
+    if (leituraX > (CENTRO + MARGEM)) {
+        estadoX = 'D';
+    } else if (leituraX < (CENTRO - MARGEM)) {
+        estadoX = 'E';
+    }
+
+    // Lógica Eixo Y (C, B, P)
+    if (leituraY > (CENTRO + MARGEM)) {
+        estadoY = 'C';
+    } else if (leituraY < (CENTRO - MARGEM)) {
+        estadoY = 'B';
+    }
+
+    // Monta o pacote de 2 bytes exatos para o stream.Read(buffer, 0, 2)
+    byte pacote[2] = {(byte)estadoX, (byte)estadoY};
+
+    // Envia os bytes crus
+    Serial.write(pacote, 2);
+    
+    // Garante que os dados saiam do buffer do chip para o Windows imediatamente
+    Serial.flush();
+
+    // Delay de 50ms para sincronizar com o processamento da Unity
+    delay(50);
 }
