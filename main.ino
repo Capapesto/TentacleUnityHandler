@@ -79,15 +79,12 @@ void loop() {
   char estadoX = eixoX.lerEstado();
   char estadoY = eixoY.lerEstado();
 
-  // Monta o pacote no mesmo formato do Python (ex: "PP", "DP", "EC")
-  char pacote[3];
-  pacote[0] = estadoX;
-  pacote[1] = estadoY;
-  pacote[2] = '\0'; // Terminador de string (opcional, mas bom para debug)
+  // Monta o pacote estritamente com os 2 bytes esperados pela Unity
+  byte pacote[2] = {estadoX, estadoY};
   
-  // Envia os "negócio pra usb"
-  Serial.print(pacote);
+  // Envia os bytes crus (raw) para a porta Serial
+  Serial.write(pacote, 2);
 
-  // Aguarda 50ms para replicar o self.root.after(50) do Tkinter
+  // Aguarda 50ms para replicar o self.root.after(50) do Python
   delay(50); 
 }
