@@ -1,5 +1,5 @@
-
 class EixoPotenciometro {
+
   private:
     byte pinoAnalogico;
     char cmdSobe;
@@ -10,8 +10,8 @@ class EixoPotenciometro {
     unsigned long ultimoTempoMovimento;
     char estadoAtual;
     
-    const int threshold = 4; // Margem de ruído
-    const unsigned long tempoEstatico = 300; // 300ms parado
+    const int threshold = 4; 
+    const unsigned long tempoEstatico = 300;
 
   public:
     
@@ -29,17 +29,16 @@ class EixoPotenciometro {
       estadoAtual = cmdParado;
     }
 
-    
     char lerEstado() {
       int valorAtual = analogRead(pinoAnalogico);
       unsigned long tempoAtual = millis();
 
-      // se variação > ruido
+      // Detecta movimento
       if (abs(valorAtual - valorAnterior) > threshold) {
-        
+
         if (valorAtual > valorAnterior) {
           estadoAtual = cmdSobe;
-        } else if (valorAtual < valorAnterior) {
+        } else {
           estadoAtual = cmdDesce;
         }
 
@@ -47,8 +46,8 @@ class EixoPotenciometro {
         ultimoTempoMovimento = tempoAtual;
       }
 
-      // Se passou o tempo sem mudanças, "Parado"
-      if (estadoAtual != cmdParado && (tempoAtual - ultimoTempoMovimento >= tempoEstatico)) {
+      // Timeout → parado
+      if (tempoAtual - ultimoTempoMovimento > tempoEstatico) {
         estadoAtual = cmdParado;
       }
 
@@ -56,45 +55,38 @@ class EixoPotenciometro {
     }
 };
 
+
 // ==========================================
 // Eixos
-// (Pino, Sobe, Desce, Parado)
-// P = Parado, E = Esquerda, D = Direita, B = Baixo, C = Cima
 // ==========================================
 EixoPotenciometro eixoX(D34, 'D', 'E', 'P'); 
 EixoPotenciometro eixoY(D35, 'C', 'B', 'P');
 
-//67
-// anti flood 
-char ultimoEstadoX = '-';
-char ultimoEstadoY = '-';
+// Timer de envio (igual ao after do Python)
+unsigned long ultimoEnvio = 0;
+const int intervaloEnvio = 50; // ms
 
 void setup() {
-  
-  Serial.begin(115200); 
-  
+  Serial.begin(115200);
+
   eixoX.iniciar();
   eixoY.iniciar();
 }
 
 void loop() {
-  // coleta de estados
-  char estadoX = eixoX.lerEstado();
-  char estadoY = eixoY.lerEstado();
 
-  //comparação do tultimo estado
-  if (estadoX != ultimoEstadoX || estadoY != ultimoEstadoY) {
-    
-    
+  unsigned long agora = millis();
+
+  // equivalente ao root.after(50)
+  if (agora - ultimoEnvio >= intervaloEnvio) {
+
+    char estadoX = eixoX.lerEstado();
+    char estadoY = eixoY.lerEstado();
+
     byte pacote[2] = {estadoX, estadoY};
-    
-    // envia os negocio pra usb
+
     Serial.write(pacote, 2);
 
-    //atualiza a memora
-    ultimoEstadoX = estadoX;
-    ultimoEstadoY = estadoY;
+    ultimoEnvio = agora;
   }
-  
-  delay(10); 
 }
